@@ -18,6 +18,8 @@ import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score
 
+from utils import mixup_batch
+
 logger = logging.getLogger(__name__)
 
 
@@ -88,18 +90,21 @@ def run_epoch(
     optimizer: optim.Optimizer | None,
     device: torch.device,
     phase: str,
+    mixup_alpha: float = 0.0,
 ) -> tuple[float, np.ndarray, np.ndarray, np.ndarray]:
     """
     Run one epoch of training or validation.
 
     Parameters
     ----------
-    model     : the network
-    loader    : DataLoader for the current phase
-    criterion : loss function
-    optimizer : pass None for validation (no backward pass)
-    device    : torch.device
-    phase     : "train" | "val"
+    model       : the network
+    loader      : DataLoader for the current phase
+    criterion   : loss function
+    optimizer   : pass None for validation (no backward pass)
+    device      : torch.device
+    phase       : "train" | "val"
+    mixup_alpha : Beta distribution alpha for MixUp.  0 = disabled.
+                  Applied only during training; ignored for validation.
 
     Returns
     -------
@@ -109,6 +114,7 @@ def run_epoch(
     all_probs  : softmax probabilities        (N, C)
     """
     is_train = phase == "train"
+    use_mixup = is_train and mixup_alpha > 0.0
     model.train() if is_train else model.eval()
 
     running_loss            = 0.0
@@ -119,8 +125,15 @@ def run_epoch(
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
-            logits = model(images)                     # (B, num_classes)
-            loss   = criterion(logits, labels)
+            if use_mixup:
+                images, labels_a, labels_b, lam = mixup_batch(images, labels, alpha=mixup_alpha)
+                logits = model(images)
+                loss   = lam * criterion(logits, labels_a) + (1 - lam) * criterion(logits, labels_b)
+                # For metric logging, report the dominant label
+                labels = labels_a if lam >= 0.5 else labels_b
+            else:
+                logits = model(images)
+                loss   = criterion(logits, labels)
 
             if is_train:
                 optimizer.zero_grad()
@@ -247,13 +260,15 @@ def train(
 
         # ── train phase ───────────────────────────────────────────────────────
         t_loss, t_labels, t_preds, _ = run_epoch(
-            model, train_loader, criterion, optimizer, device, "train"
+            model, train_loader, criterion, optimizer, device, "train",
+            mixup_alpha=cfg.get("mixup_alpha", 0.0),
         )
         t_acc = accuracy_score(t_labels, t_preds)
 
         # ── val phase ─────────────────────────────────────────────────────────
         v_loss, v_labels, v_preds, v_probs = run_epoch(
-            model, val_loader, criterion, None, device, "val"
+            model, val_loader, criterion, None, device, "val",
+            mixup_alpha=0.0,  # never apply MixUp during evaluation
         )
         v_metrics = compute_metrics_fn(v_labels, v_preds, v_probs, cfg["class_names"])
 
