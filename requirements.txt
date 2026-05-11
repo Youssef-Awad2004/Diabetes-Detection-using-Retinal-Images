@@ -1,6 +1,7 @@
-torch
-torchvision
-scikit-learn
-matplotlib
-seaborn
-pillow
+torch>=2.1.0
+torchvision>=0.16.0
+scikit-learn>=1.3.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+numpy>=1.24.0
+Pillow>=10.0.0
