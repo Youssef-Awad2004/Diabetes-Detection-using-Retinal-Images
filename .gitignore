@@ -141,6 +141,7 @@ mnesia/
 rabbitmq/
 rabbitmq-data/
 
+data/
 # ActiveMQ
 activemq-data/
 
