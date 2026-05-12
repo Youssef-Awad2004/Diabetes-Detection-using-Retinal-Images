@@ -17,6 +17,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from sklearn.metrics import accuracy_score
+from tqdm import tqdm
 
 from utils import mixup_batch
 
@@ -119,8 +120,16 @@ def run_epoch(
     running_loss            = 0.0
     all_labels, all_preds, all_probs = [], [], []
 
+    pbar = tqdm(
+        loader,
+        desc=f"{phase.upper():<5}",
+        unit="batch",
+        leave=False,
+        dynamic_ncols=True,
+    )
+
     with torch.set_grad_enabled(is_train):
-        for images, labels in loader:
+        for images, labels in pbar:
             images = images.to(device, non_blocking=True)
             labels = labels.to(device, non_blocking=True)
 
@@ -148,6 +157,9 @@ def run_epoch(
             all_labels.extend(labels.cpu().numpy().tolist())
             all_preds.extend(preds.tolist())
             all_probs.append(probs)
+
+            # live loss in the progress bar suffix
+            pbar.set_postfix(loss=f"{loss.item():.4f}")
 
     avg_loss   = running_loss / len(loader.dataset)
     all_labels = np.array(all_labels)

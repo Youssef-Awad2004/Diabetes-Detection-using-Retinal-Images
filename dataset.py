@@ -90,13 +90,18 @@ class CLAHETransform:
     """
 
     def __init__(self, clip_limit: float = 2.0, tile_grid: tuple = (8, 8)):
-        self.clahe = cv2.createCLAHE(clipLimit=clip_limit,
-                                     tileGridSize=tile_grid)
+        self.clip_limit = clip_limit
+        self.tile_grid  = tile_grid
+        # NOTE: cv2.CLAHE is not picklable, so it cannot be stored as an
+        # instance attribute when num_workers > 0 on Windows (spawn).
+        # The object is created lazily per-call instead.
 
     def __call__(self, img: Image.Image) -> Image.Image:
+        clahe = cv2.createCLAHE(clipLimit=self.clip_limit,
+                                tileGridSize=self.tile_grid)
         arr = np.array(img)                          # H×W×3 uint8 RGB
         lab = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
-        lab[:, :, 0] = self.clahe.apply(lab[:, :, 0])
+        lab[:, :, 0] = clahe.apply(lab[:, :, 0])
         result = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
         return Image.fromarray(result)
 
