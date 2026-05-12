@@ -195,13 +195,18 @@ class MetricsTracker:
     """Accumulates per-epoch scalar metrics for end-of-training curve plots."""
 
     def __init__(self):
-        self.train_loss       : list[float] = []
-        self.val_loss         : list[float] = []
-        self.train_acc        : list[float] = []
-        self.val_acc          : list[float] = []
-        self.val_auc          : list[float] = []
-        self.val_sensitivity  : list[float] = []
-        self.val_specificity  : list[float] = []
+        self.train_loss           : list[float] = []
+        self.val_loss             : list[float] = []
+        self.train_acc            : list[float] = []
+        self.val_acc              : list[float] = []
+        self.val_balanced_acc     : list[float] = []
+        self.val_auc              : list[float] = []
+        self.val_weighted_auc     : list[float] = []
+        self.val_macro_f1         : list[float] = []
+        self.val_macro_precision  : list[float] = []
+        self.val_macro_recall     : list[float] = []
+        self.val_sensitivity      : list[float] = []
+        self.val_specificity      : list[float] = []
 
     def update(
         self,
@@ -214,7 +219,12 @@ class MetricsTracker:
         self.val_loss.append(v_loss)
         self.train_acc.append(t_acc)
         self.val_acc.append(v_metrics["accuracy"])
+        self.val_balanced_acc.append(v_metrics.get("balanced_accuracy", float("nan")))
         self.val_auc.append(v_metrics["auc_roc"])
+        self.val_weighted_auc.append(v_metrics.get("weighted_auc_roc", float("nan")))
+        self.val_macro_f1.append(v_metrics.get("macro_f1", float("nan")))
+        self.val_macro_precision.append(v_metrics.get("macro_precision", float("nan")))
+        self.val_macro_recall.append(v_metrics.get("macro_recall", float("nan")))
         self.val_sensitivity.append(v_metrics["macro_sensitivity"])
         self.val_specificity.append(v_metrics["macro_specificity"])
 
@@ -279,7 +289,10 @@ def train(
         elapsed = time.time() - t0
         logger.info("── Epoch %d/%d  (%.1fs) ─────────────────", epoch, cfg["epochs"], elapsed)
         log_metrics_fn("TRAIN", epoch, t_loss,
-                       {"accuracy": t_acc, "auc_roc": float("nan"),
+                       {"accuracy": t_acc, "balanced_accuracy": float("nan"),
+                        "auc_roc": float("nan"), "weighted_auc_roc": float("nan"),
+                        "macro_f1": float("nan"), "macro_precision": float("nan"),
+                        "macro_recall": float("nan"),
                         "macro_sensitivity": float("nan"),
                         "macro_specificity": float("nan")},
                        cfg["class_names"])

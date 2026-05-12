@@ -7,10 +7,24 @@ Edit values here; every other module imports from this file.
 
 CONFIG = {
     # ── Paths ────────────────────────────────────────────────────────────────
-    "train_dir"      : "data/train",
-    "val_dir"        : "data/val",
-    "checkpoint_dir" : "checkpoints",
-    "results_dir"    : "results",
+    # APTOS / Kaggle flat-folder format:
+    #   train.csv        → id_code, diagnosis (0-4)
+    #   train_images/    → <id_code>.png  (no class subdirectories)
+    #   test.csv         → id_code only (unlabelled Kaggle test set)
+    #   test_images/     → <id_code>.png
+    "train_csv"        : "data/train.csv",
+    "train_images_dir" : "data/train_images",
+    "test_csv"         : "data/test.csv",
+    "test_images_dir"  : "data/test_images",
+    "checkpoint_dir"   : "checkpoints",
+    "results_dir"      : "results",
+
+    # Stratified 80/10/10 split of train.csv into train / val / test.
+    # val   — used for LR scheduling & early stopping (indirectly touched)
+    # test  — held-out, never seen during training; final unbiased evaluation
+    # test_images/ remains for the unlabelled Kaggle submission only.
+    "val_split"        : 0.1,
+    "test_split"       : 0.1,
 
     # ── Model ────────────────────────────────────────────────────────────────
     "num_classes"    : 5,

@@ -67,7 +67,7 @@ def main() -> None:
 
     # ── data ──────────────────────────────────────────────────────────────────
     logger.info("Loading datasets …")
-    train_loader, val_loader, class_weights = build_dataloaders(cfg)
+    train_loader, val_loader, test_loader, class_weights = build_dataloaders(cfg)
 
     # ── model ─────────────────────────────────────────────────────────────────
     logger.info("Building model: %s", cfg["model_name"])
@@ -87,6 +87,22 @@ def main() -> None:
         plot_epoch_fn      = epoch_plot_callback,
         plot_curves_fn     = plot_training_curves,
     )
+
+    # ── final held-out test evaluation ───────────────────────────────────────
+    # The test split was never seen during training or LR scheduling.
+    # These numbers are the honest generalisation estimate.
+    logger.info("=" * 70)
+    logger.info("FINAL EVALUATION on held-out test set")
+    logger.info("=" * 70)
+    from trainer import run_epoch
+    from torch.nn import CrossEntropyLoss
+    criterion_test = CrossEntropyLoss(weight=class_weights.to(device))
+    _, test_labels, test_preds, test_probs = run_epoch(
+        model, test_loader, criterion_test, None, device, "val", mixup_alpha=0.0
+    )
+    test_metrics = compute_metrics(test_labels, test_preds, test_probs, cfg["class_names"])
+    log_metrics("TEST", 0, float("nan"), test_metrics)
+    print_classification_report(test_labels, test_preds, cfg["class_names"])
 
     logger.info("Pipeline complete. Outputs saved to '%s' and '%s'.",
                 cfg["results_dir"], cfg["checkpoint_dir"])

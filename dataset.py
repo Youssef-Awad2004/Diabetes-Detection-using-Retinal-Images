@@ -10,13 +10,16 @@ Handles all data concerns:
 """
 
 import logging
+import os
 import numpy as np
+import pandas as pd
 import cv2
 
 import torch
 from PIL import Image
-from torch.utils.data import DataLoader, WeightedRandomSampler
-from torchvision import datasets, transforms
+from torch.utils.data import DataLoader, Dataset, WeightedRandomSampler
+from torchvision import transforms
+from sklearn.model_selection import StratifiedShuffleSplit
 
 logger = logging.getLogger(__name__)
 
@@ -206,59 +209,147 @@ def get_transforms(image_size: int, split: str, cfg: dict = None) -> transforms.
 #  DATASET & DATALOADER BUILDER
 # ─────────────────────────────────────────────────────────────────────────────
 
-def build_dataloaders(cfg: dict) -> tuple[DataLoader, DataLoader, torch.Tensor]:
-    """
-    Build train and validation DataLoaders from an ImageFolder directory tree.
+# ─────────────────────────────────────────────────────────────────────────────
+#  DATASET
+# ─────────────────────────────────────────────────────────────────────────────
 
-    Expected directory structure
-    ────────────────────────────
-    data/
-      train/
-        Normal/           img1.jpg  img2.jpg …
-        Mild DR/          …
-        Moderate DR/      …
-        Severe DR/        …
-        Proliferative DR/ …
-      val/
-        Normal/           …
-        …
+class RetinalDataset(Dataset):
+    """
+    Custom Dataset for the APTOS / flat-folder format:
+
+        data/train.csv          ← columns: id_code, diagnosis  (int 0-4)
+        data/train_images/      ← <id_code>.png  (all images in one directory)
+
+    This replaces torchvision.datasets.ImageFolder which requires images to be
+    pre-sorted into class-labelled subdirectories — a layout this dataset does
+    NOT have.
+
+    Parameters
+    ──────────
+    df          : DataFrame with columns ['id_code', 'diagnosis']
+    images_dir  : directory containing <id_code>.png files
+    transform   : torchvision transform pipeline
+    """
+
+    def __init__(self, df: pd.DataFrame, images_dir: str, transform=None):
+        self.df         = df.reset_index(drop=True)
+        self.images_dir = images_dir
+        self.transform  = transform
+
+    def __len__(self) -> int:
+        return len(self.df)
+
+    def __getitem__(self, idx: int):
+        row      = self.df.iloc[idx]
+        img_path = os.path.join(self.images_dir, row["id_code"] + ".png")
+        img      = Image.open(img_path).convert("RGB")
+        if self.transform:
+            img = self.transform(img)
+        return img, int(row["diagnosis"])
+
+    @property
+    def targets(self) -> list[int]:
+        """List of integer labels — same interface as ImageFolder.targets."""
+        return self.df["diagnosis"].tolist()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  DATASET & DATALOADER BUILDER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_dataloaders(
+    cfg: dict,
+) -> tuple[DataLoader, DataLoader, DataLoader, torch.Tensor]:
+    """
+    Build train / val / test DataLoaders from a single labelled CSV.
+
+    Why three splits from train.csv?
+    ──────────────────────────────────
+    The Kaggle test_images have no labels — they can only produce a submission
+    CSV, not real metric estimates.  Holding out a stratified test split from
+    the labelled data gives a *truly untouched* set to measure generalisation.
+
+      train (80%) — model sees these images during forward/backward pass
+      val   (10%) — used for LR scheduling & early stopping (indirectly touched)
+      test  (10%) — never seen during training; final unbiased evaluation only
+
+    An 80/10/10 split is used rather than 70/15/15 to preserve more training
+    data.  With only ~194 Grade-3 images (5.3% of 3,662), a 15% test slice
+    would leave ~29 Grade-3 test samples — too few for stable metric estimates.
+
+    Both splits use StratifiedShuffleSplit to keep class proportions identical
+    across all three subsets.
 
     Returns
-    -------
-    train_loader  : DataLoader
-    val_loader    : DataLoader
-    class_weights : 1-D FloatTensor of shape (num_classes,)
-                    Inverse-frequency weights; pass to CrossEntropyLoss.
+    ───────
+    train_loader  : DataLoader  (WeightedRandomSampler if use_weighted_sampler)
+    val_loader    : DataLoader  (deterministic)
+    test_loader   : DataLoader  (deterministic, held-out)
+    class_weights : FloatTensor (num_classes,) — inverse-frequency weights for loss
     """
-    train_dataset = datasets.ImageFolder(
-        root=cfg["train_dir"],
-        transform=get_transforms(cfg["image_size"], "train", cfg),  # pass cfg so flags are honoured
+    df = pd.read_csv(cfg["train_csv"])
+    images_dir = cfg["train_images_dir"]
+
+    val_split  = cfg.get("val_split",  0.1)
+    test_split = cfg.get("test_split", 0.1)
+
+    # ── stage 1: carve out the held-out test set ──────────────────────────────
+    sss1 = StratifiedShuffleSplit(
+        n_splits=1, test_size=test_split, random_state=cfg["seed"]
     )
-    val_dataset = datasets.ImageFolder(
-        root=cfg["val_dir"],
+    trainval_idx, test_idx = next(sss1.split(df, df["diagnosis"]))
+    trainval_df = df.iloc[trainval_idx]
+    test_df     = df.iloc[test_idx]
+
+    # ── stage 2: split remaining data into train / val ────────────────────────
+    # val_split is expressed as a fraction of the *original* dataset, so we
+    # rescale it to be a fraction of the train+val pool.
+    val_fraction = val_split / (1.0 - test_split)
+    sss2 = StratifiedShuffleSplit(
+        n_splits=1, test_size=val_fraction, random_state=cfg["seed"]
+    )
+    train_idx, val_idx = next(sss2.split(trainval_df, trainval_df["diagnosis"]))
+    train_df = trainval_df.iloc[train_idx]
+    val_df   = trainval_df.iloc[val_idx]
+
+    train_dataset = RetinalDataset(
+        train_df, images_dir,
+        transform=get_transforms(cfg["image_size"], "train", cfg),
+    )
+    val_dataset = RetinalDataset(
+        val_df, images_dir,
         transform=get_transforms(cfg["image_size"], "val", cfg),
+    )
+    test_dataset = RetinalDataset(
+        test_df, images_dir,
+        transform=get_transforms(cfg["image_size"], "val", cfg),  # deterministic
     )
 
     # ── inverse-frequency class weights (for CrossEntropyLoss) ───────────────
-    class_counts  = np.bincount(train_dataset.targets)
-    class_weights = 1.0 / (class_counts + 1e-6)
+    class_counts         = np.bincount(train_dataset.targets, minlength=cfg["num_classes"])
+    val_counts           = np.bincount(val_dataset.targets,   minlength=cfg["num_classes"])
+    test_counts          = np.bincount(test_dataset.targets,  minlength=cfg["num_classes"])
+    class_weights        = 1.0 / (class_counts + 1e-6)
     class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
 
+    # ── class distribution table — printed before training starts ─────────────
+    logger.info("=" * 72)
+    logger.info("SPLIT CLASS DISTRIBUTION (stratified 80 / 10 / 10)")
+    logger.info("%-24s  %8s  %8s  %8s", "Class", "Train", "Val", "Test")
+    logger.info("-" * 52)
+    for i, name in enumerate(cfg["class_names"]):
+        logger.info(
+            "%-24s  %8d  %8d  %8d",
+            name, class_counts[i], val_counts[i], test_counts[i],
+        )
+    logger.info("-" * 52)
     logger.info(
-        "Class distribution (train): %s",
-        dict(zip(cfg["class_names"], class_counts.tolist())),
+        "%-24s  %8d  %8d  %8d",
+        "TOTAL", class_counts.sum(), val_counts.sum(), test_counts.sum(),
     )
-    logger.info(
-        "Train samples: %d  |  Val samples: %d",
-        len(train_dataset), len(val_dataset),
-    )
+    logger.info("=" * 72)
 
     # ── WeightedRandomSampler — fixes imbalance at the batch level ───────────
-    # Each sample is assigned a weight equal to its class's inverse frequency.
-    # This ensures every batch contains a representative mix of all 5 grades,
-    # solving the problem of rare grades (Severe: 5.3%) being under-drawn per
-    # epoch compared to No-DR (49.3%).
-    # num_samples = len(train_dataset) keeps epoch length identical to shuffle=True.
     use_weighted_sampler = cfg.get("use_weighted_sampler", True)
     if use_weighted_sampler:
         sample_weights = torch.tensor(
@@ -273,7 +364,7 @@ def build_dataloaders(cfg: dict) -> tuple[DataLoader, DataLoader, torch.Tensor]:
         train_loader = DataLoader(
             train_dataset,
             batch_size=cfg["batch_size"],
-            sampler=sampler,           # mutually exclusive with shuffle=True
+            sampler=sampler,
             num_workers=cfg["num_workers"],
             pin_memory=True,
             drop_last=True,
@@ -295,5 +386,14 @@ def build_dataloaders(cfg: dict) -> tuple[DataLoader, DataLoader, torch.Tensor]:
         num_workers=cfg["num_workers"],
         pin_memory=True,
     )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=cfg["batch_size"],
+        shuffle=False,
+        num_workers=cfg["num_workers"],
+        pin_memory=True,
+    )
 
-    return train_loader, val_loader, class_weights_tensor
+    return train_loader, val_loader, test_loader, class_weights_tensor
+
+
