@@ -27,7 +27,7 @@ CONFIG = {
     "test_split"       : 0.1,
 
     # ── Model ────────────────────────────────────────────────────────────────
-    "num_classes"    : 5,
+    "num_classes"    : 3,
     "model_name"     : "efficientnet_b3",   # or "resnet50"
     "freeze_fraction": 0.65,                # fraction of backbone blocks to freeze
                                             # 0.65 ≈ 5/9 blocks frozen — balances
@@ -55,7 +55,7 @@ CONFIG = {
 
     # ── Focal Loss ───────────────────────────────────────────────────────────
     # gamma > 0 activates FocalLoss instead of CrossEntropyLoss.
-    # Focuses gradient on hard, misclassified examples (e.g. Moderate DR).
+    # Focuses gradient on hard, misclassified examples (e.g. Mild/Moderate DR).
     # gamma=2.0 is the standard value from Lin et al. (RetinaNet, 2017).
     # Set to 0.0 to fall back to plain weighted CrossEntropyLoss.
     "focal_loss_gamma"        : 2.0,
@@ -63,8 +63,12 @@ CONFIG = {
     # ── Misc ─────────────────────────────────────────────────────────────────
     "seed"           : 42,
     "class_names"    : [
-        "Normal", "Mild DR", "Moderate DR", "Severe DR", "Proliferative DR"
+        "Normal", "Mild/Moderate DR", "Severe/Proliferative DR"
     ],
+    # Original APTOS labels → merged labels:
+    # 0 (Normal) → 0, 1 (Mild) → 1, 2 (Moderate) → 1,
+    # 3 (Severe) → 2, 4 (Proliferative) → 2
+    "label_map"      : {0: 0, 1: 1, 2: 1, 3: 2, 4: 2},
 
     # ── Preprocessing (quality-aware, EDA-driven) ─────────────────────────
     # Ben Graham: circle-crop + local-average subtraction.

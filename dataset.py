@@ -234,10 +234,11 @@ class RetinalDataset(Dataset):
     transform   : torchvision transform pipeline
     """
 
-    def __init__(self, df: pd.DataFrame, images_dir: str, transform=None):
+    def __init__(self, df: pd.DataFrame, images_dir: str, transform=None, label_map: dict = None):
         self.df         = df.reset_index(drop=True)
         self.images_dir = images_dir
         self.transform  = transform
+        self._label_map = label_map
 
     def __len__(self) -> int:
         return len(self.df)
@@ -248,11 +249,15 @@ class RetinalDataset(Dataset):
         img      = Image.open(img_path).convert("RGB")
         if self.transform:
             img = self.transform(img)
-        return img, int(row["diagnosis"])
+        raw_label = int(row["diagnosis"])
+        label = self._label_map.get(raw_label, raw_label) if self._label_map else raw_label
+        return img, label
 
     @property
     def targets(self) -> list[int]:
         """List of integer labels — same interface as ImageFolder.targets."""
+        if self._label_map:
+            return [self._label_map.get(int(d), int(d)) for d in self.df["diagnosis"]]
         return self.df["diagnosis"].tolist()
 
 
@@ -315,17 +320,22 @@ def build_dataloaders(
     train_df = trainval_df.iloc[train_idx]
     val_df   = trainval_df.iloc[val_idx]
 
+    label_map = cfg.get("label_map", None)
+
     train_dataset = RetinalDataset(
         train_df, images_dir,
         transform=get_transforms(cfg["image_size"], "train", cfg),
+        label_map=label_map,
     )
     val_dataset = RetinalDataset(
         val_df, images_dir,
         transform=get_transforms(cfg["image_size"], "val", cfg),
+        label_map=label_map,
     )
     test_dataset = RetinalDataset(
         test_df, images_dir,
         transform=get_transforms(cfg["image_size"], "val", cfg),  # deterministic
+        label_map=label_map,
     )
 
     # ── inverse-frequency class weights (for CrossEntropyLoss) ───────────────
