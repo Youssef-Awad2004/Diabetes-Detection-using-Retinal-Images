@@ -23,12 +23,12 @@ import logging
 from pathlib import Path
 
 from config import CONFIG
-from data.dataset import build_dataloaders
-from models.model import build_model
-from training.trainer import train
-from evaluation.metrics import compute_metrics, log_metrics, print_classification_report
-from evaluation.plots import plot_epoch_results, plot_training_curves
-from utils.utils import seed_everything, get_device
+from dataset import build_dataloaders
+from model import build_model
+from trainer import train
+from metrics import compute_metrics, log_metrics, print_classification_report
+from plots import plot_epoch_results, plot_training_curves
+from utils import seed_everything, get_device
 
 # ── logging setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(

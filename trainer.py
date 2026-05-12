@@ -73,7 +73,6 @@ def build_optimizer_and_scheduler(
         factor=cfg["lr_factor"],
         patience=cfg["lr_patience"],
         min_lr=cfg["min_lr"],
-        verbose=True,
     )
 
     return criterion, optimizer, scheduler
