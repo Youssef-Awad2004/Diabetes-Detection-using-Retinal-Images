@@ -1,4 +1,6 @@
 from fastapi import FastAPI, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import base64
 import numpy as np
@@ -13,6 +15,23 @@ from model import build_model
 from utils import get_device
 
 app = FastAPI()
+
+# Frontend integration settings
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:3000")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[FRONTEND_ORIGIN],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# If a static export of the Next.js frontend exists at `frontend/out`, serve it.
+FRONTEND_BUILD_DIR = os.path.join(os.path.dirname(__file__), "frontend", "out")
+if os.path.exists(FRONTEND_BUILD_DIR):
+    app.mount("/", StaticFiles(directory=FRONTEND_BUILD_DIR, html=True), name="frontend")
+else:
+    print(f"Frontend build not found at {FRONTEND_BUILD_DIR}. To serve static frontend, export Next.js to this folder.")
 
 # Define the request model for base64 input
 class ImageRequest(BaseModel):
