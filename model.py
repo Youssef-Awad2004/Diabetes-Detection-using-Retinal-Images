@@ -59,7 +59,7 @@ def build_model(cfg: dict) -> nn.Module:
 
         # Custom head: Dropout → FC → SiLU → Dropout → logits
         model.classifier = nn.Sequential(
-            nn.Dropout(p=0.4, inplace=True),
+            nn.Dropout(p=0.4),
             nn.Linear(in_features, 512),
             nn.SiLU(),           # smooth activation consistent with EfficientNet body
             nn.Dropout(p=0.3),

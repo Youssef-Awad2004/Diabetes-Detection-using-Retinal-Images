@@ -200,10 +200,8 @@ def get_transforms(image_size: int, split: str, cfg: dict = None) -> transforms.
             # Random erasing — simulates optic-disc / vessel occlusion artefacts
             transforms.RandomErasing(p=0.1, scale=(0.02, 0.05)),
         ])
-
-    else:   # val / test — deterministic
+    else:   # val / test — deterministic, NO heavy preprocessing
         return transforms.Compose([
-            *preprocess_steps,
             transforms.Resize((image_size, image_size)),
             transforms.ToTensor(),
             transforms.Normalize(mean=imagenet_mean, std=imagenet_std),
@@ -335,6 +333,7 @@ def build_dataloaders(
     val_counts           = np.bincount(val_dataset.targets,   minlength=cfg["num_classes"])
     test_counts          = np.bincount(test_dataset.targets,  minlength=cfg["num_classes"])
     class_weights        = 1.0 / (class_counts + 1e-6)
+    class_weights = class_weights / class_weights.sum()   # add this line
     class_weights_tensor = torch.tensor(class_weights, dtype=torch.float32)
 
     # ── class distribution table — printed before training starts ─────────────
