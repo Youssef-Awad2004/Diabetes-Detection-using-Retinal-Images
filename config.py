@@ -29,7 +29,9 @@ CONFIG = {
     # ── Model ────────────────────────────────────────────────────────────────
     "num_classes"    : 5,
     "model_name"     : "efficientnet_b3",   # or "resnet50"
-    "freeze_fraction": 0.7,                 # fraction of backbone blocks to freeze
+    "freeze_fraction": 0.65,                # fraction of backbone blocks to freeze
+                                            # 0.65 ≈ 5/9 blocks frozen — balances
+                                            # backbone adaptation vs. overfitting on ~3k samples
 
     # ── Training ─────────────────────────────────────────────────────────────
     "epochs"         : 40,
@@ -43,7 +45,20 @@ CONFIG = {
     "lr_patience"    : 5,
     "lr_factor"      : 0.3,
     "min_lr"         : 1e-7,
-    "label_smoothing": 0.1,
+    "label_smoothing": 0.05,               # reduced from 0.1 — less regularisation
+                                            # stacked on top of focal loss + mixup
+
+    # ── Early Stopping ───────────────────────────────────────────────────────
+    # Monitors val_loss.  Set to 0 to disable.
+    "early_stopping_patience" : 10,
+    "early_stopping_min_delta": 1e-4,
+
+    # ── Focal Loss ───────────────────────────────────────────────────────────
+    # gamma > 0 activates FocalLoss instead of CrossEntropyLoss.
+    # Focuses gradient on hard, misclassified examples (e.g. Moderate DR).
+    # gamma=2.0 is the standard value from Lin et al. (RetinaNet, 2017).
+    # Set to 0.0 to fall back to plain weighted CrossEntropyLoss.
+    "focal_loss_gamma"        : 2.0,
 
     # ── Misc ─────────────────────────────────────────────────────────────────
     "seed"           : 42,
@@ -69,8 +84,8 @@ CONFIG = {
 
     # MixUp: interpolates images+labels between two samples per batch.
     # Teaches the model the ordinal severity continuum (EDA Finding #2).
-    # alpha=0.4 is conservative — strong enough to regularise without
+    # alpha=0.2 is conservative — strong enough to regularise without
     # destroying fine lesion signals critical for DR grading.
     # Set to 0.0 to disable MixUp entirely.
-    "mixup_alpha"     : 0.4,
+    "mixup_alpha"     : 0.2,
 }

@@ -101,7 +101,7 @@ def main() -> None:
         model, test_loader, criterion_test, None, device, "val", mixup_alpha=0.0
     )
     test_metrics = compute_metrics(test_labels, test_preds, test_probs, cfg["class_names"])
-    log_metrics("TEST", 0, float("nan"), test_metrics)
+    log_metrics("TEST", 0, float("nan"), test_metrics, cfg["class_names"])
     print_classification_report(test_labels, test_preds, cfg["class_names"])
 
     logger.info("Pipeline complete. Outputs saved to '%s' and '%s'.",

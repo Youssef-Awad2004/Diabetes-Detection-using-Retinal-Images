@@ -15,6 +15,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from sklearn.metrics import accuracy_score
 from tqdm import tqdm
@@ -22,6 +23,93 @@ from tqdm import tqdm
 from utils import mixup_batch
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  FOCAL LOSS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FocalLoss(nn.Module):
+    """
+    Alpha-balanced focal loss for multi-class classification.
+
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+
+    gamma > 0 down-weights easy, well-classified examples so the gradient
+    focuses on the hard, misclassified ones — critical for Moderate/Severe DR
+    which are consistently ignored under plain cross-entropy.
+    """
+
+    def __init__(
+        self,
+        weight: torch.Tensor | None = None,
+        gamma: float = 2.0,
+        label_smoothing: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.gamma           = gamma
+        self.label_smoothing = label_smoothing
+        # Use CE with reduction='none' so we can apply the focal modulator per sample
+        self._ce = nn.CrossEntropyLoss(
+            weight=weight,
+            label_smoothing=label_smoothing,
+            reduction="none",
+        )
+
+    def forward(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        # pt must be the raw (unweighted) probability of the ground-truth class.
+        # Using exp(-weighted_ce) as a proxy is incorrect: it computes p_c^weight,
+        # which collapses to ~0 for minority classes and kills the focal modulation.
+        with torch.no_grad():
+            probs = F.softmax(logits, dim=1)                          # (N, C)
+            pt    = probs.gather(1, targets.view(-1, 1)).squeeze(1)   # (N,)
+        focal_weight = (1.0 - pt) ** self.gamma                       # (N,)
+
+        ce_loss = self._ce(logits, targets)          # (N,)  weighted + smoothed
+        return (focal_weight * ce_loss).mean()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  EARLY STOPPING
+# ─────────────────────────────────────────────────────────────────────────────
+
+class EarlyStopping:
+    """
+    Stops training when a monitored metric stops improving.
+
+    Parameters
+    ----------
+    patience  : epochs to wait after last improvement before stopping
+    min_delta : minimum change to qualify as an improvement
+    mode      : 'min' (loss) or 'max' (accuracy / AUC)
+    """
+
+    def __init__(self, patience: int = 10, min_delta: float = 1e-4, mode: str = "min") -> None:
+        self.patience  = patience
+        self.min_delta = min_delta
+        self.mode      = mode
+        self.counter   = 0
+        self.best      = float("inf") if mode == "min" else float("-inf")
+        self.triggered = False
+
+    def step(self, metric: float) -> bool:
+        """Call once per epoch. Returns True when training should stop."""
+        improved = (
+            (self.mode == "min" and metric < self.best - self.min_delta)
+            or (self.mode == "max" and metric > self.best + self.min_delta)
+        )
+        if improved:
+            self.best    = metric
+            self.counter = 0
+        else:
+            self.counter += 1
+            logger.debug(
+                "EarlyStopping: no improvement for %d / %d epochs (best=%.5f, current=%.5f)",
+                self.counter, self.patience, self.best, metric,
+            )
+            if self.counter >= self.patience:
+                self.triggered = True
+        return self.triggered
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -45,10 +133,20 @@ def build_optimizer_and_scheduler(
     classification head is trained at full speed.
     """
     # ── loss ──────────────────────────────────────────────────────────────────
-    criterion = nn.CrossEntropyLoss(
-        weight=class_weights.to(device),
-        label_smoothing=cfg["label_smoothing"],
-    )
+    gamma = cfg.get("focal_loss_gamma", 0.0)
+    if gamma > 0.0:
+        criterion = FocalLoss(
+            weight=class_weights.to(device),
+            gamma=gamma,
+            label_smoothing=cfg["label_smoothing"],
+        )
+        logger.info("Loss: FocalLoss (gamma=%.1f, label_smoothing=%.2f)", gamma, cfg["label_smoothing"])
+    else:
+        criterion = nn.CrossEntropyLoss(
+            weight=class_weights.to(device),
+            label_smoothing=cfg["label_smoothing"],
+        )
+        logger.info("Loss: CrossEntropyLoss (label_smoothing=%.2f)", cfg["label_smoothing"])
 
     # ── split params: backbone vs head ────────────────────────────────────────
     backbone_params, head_params = [], []
@@ -272,8 +370,19 @@ def train(
     best_val_loss = float("inf")
     best_weights  = copy.deepcopy(model.state_dict())
 
+    es_patience = cfg.get("early_stopping_patience", 0)
+    early_stopper = EarlyStopping(
+        patience=es_patience,
+        min_delta=cfg.get("early_stopping_min_delta", 1e-4),
+        mode="min",
+    ) if es_patience > 0 else None
+
     logger.info("=" * 70)
-    logger.info("Starting training — %d epochs", cfg["epochs"])
+    logger.info(
+        "Starting training — %d epochs%s",
+        cfg["epochs"],
+        f"  |  EarlyStopping patience={es_patience}" if es_patience > 0 else "",
+    )
     logger.info("=" * 70)
 
     for epoch in range(1, cfg["epochs"] + 1):
@@ -321,6 +430,15 @@ def train(
         # ── per-epoch plots ───────────────────────────────────────────────────
         plot_epoch_fn(v_metrics, v_labels, v_preds, v_probs,
                       cfg["class_names"], epoch, cfg["results_dir"])
+
+        # ── early stopping ────────────────────────────────────────────────────
+        if early_stopper is not None and early_stopper.step(v_loss):
+            logger.info(
+                "Early stopping triggered at epoch %d — no improvement for %d epochs "
+                "(best val_loss=%.5f).",
+                epoch, early_stopper.patience, early_stopper.best,
+            )
+            break
 
     # ── end of training ───────────────────────────────────────────────────────
     plot_curves_fn(tracker, cfg["results_dir"])
