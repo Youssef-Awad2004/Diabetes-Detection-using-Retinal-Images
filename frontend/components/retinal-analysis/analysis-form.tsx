@@ -6,102 +6,25 @@ import { ImageUploader } from "./image-uploader"
 import { ClassificationResultDisplay } from "./classification-result"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
-import { API_CONFIG, type ClassificationResult, type APIResponse } from "@/lib/api-config"
+import { API_CONFIG, type ClassificationResult, type APIResponse, mapBackendResponse } from "@/lib/api-config"
 
 type AnalysisState = "idle" | "uploading" | "analyzing" | "complete" | "error"
 
-/**
- * Mock classification function for demonstration purposes.
- * Replace this with actual API call when integrating with backend.
- */
 async function classifyImage(file: File): Promise<APIResponse> {
-  // Simulate network delay
-  await new Promise((resolve) => setTimeout(resolve, 2000))
+  const formData = new FormData()
+  formData.append("file", file)
 
-  // For demonstration, return a random classification
-  // In production, this would be an actual API call:
-  //
-  // const formData = new FormData()
-  // formData.append("image", file)
-  //
-  // const response = await fetch(API_CONFIG.CLASSIFICATION_API_URL, {
-  //   method: "POST",
-  //   body: formData,
-  // })
-  //
-  // if (!response.ok) {
-  //   throw new Error("Classification failed")
-  // }
-  //
-  // return response.json()
+  const response = await fetch(API_CONFIG.CLASSIFICATION_API_URL, {
+    method: "POST",
+    body: formData,
+  })
 
-  const categories: Array<{
-    category: ClassificationResult["category"]
-    confidence: number
-    details: ClassificationResult["details"]
-  }> = [
-    {
-      category: "normal",
-      confidence: 0.94,
-      details: {
-        description:
-          "The retinal image shows healthy fundus characteristics with clear optic disc margins, normal vessel caliber, and no signs of microaneurysms, hemorrhages, or exudates.",
-        recommendations: [
-          "Continue regular annual eye examinations",
-          "Maintain good glycemic control",
-          "Monitor blood pressure regularly",
-        ],
-      },
-    },
-    {
-      category: "mild",
-      confidence: 0.87,
-      details: {
-        description:
-          "Early signs of diabetic retinopathy detected, including presence of microaneurysms. No significant hemorrhages or exudates observed at this stage.",
-        recommendations: [
-          "Schedule follow-up examination in 6-12 months",
-          "Optimize blood sugar control",
-          "Consult with your primary care physician about diabetes management",
-        ],
-      },
-    },
-    {
-      category: "moderate",
-      confidence: 0.82,
-      details: {
-        description:
-          "Moderate non-proliferative diabetic retinopathy identified. Multiple microaneurysms and some hemorrhages present in multiple quadrants.",
-        recommendations: [
-          "Schedule ophthalmology appointment within 3-6 months",
-          "Intensify diabetes management",
-          "Regular blood pressure monitoring recommended",
-          "Consider lipid management evaluation",
-        ],
-      },
-    },
-    {
-      category: "severe",
-      confidence: 0.91,
-      details: {
-        description:
-          "Severe non-proliferative diabetic retinopathy detected. Significant hemorrhaging, cotton wool spots, and venous beading observed across multiple quadrants.",
-        recommendations: [
-          "Urgent ophthalmology referral recommended",
-          "Consider evaluation for laser treatment",
-          "Intensive glycemic control required",
-          "Regular monitoring every 2-3 months",
-        ],
-      },
-    },
-  ]
-
-  const randomResult = categories[Math.floor(Math.random() * categories.length)]
-
-  return {
-    success: true,
-    result: randomResult,
+  if (!response.ok) {
+    throw new Error(`Server error: ${response.status} ${response.statusText}`)
   }
+
+  const data = await response.json()
+  return mapBackendResponse(data)
 }
 
 export function AnalysisForm() {

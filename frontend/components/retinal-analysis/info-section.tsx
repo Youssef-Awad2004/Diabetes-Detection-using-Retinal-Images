@@ -69,17 +69,9 @@ export function InfoSection() {
             <span className="text-sm font-medium text-chart-2">Mild NPDR</span>
             <p className="mt-1 text-xs text-muted-foreground">Early changes</p>
           </div>
-          <div className="rounded-lg bg-warning/10 p-3">
-            <span className="text-sm font-medium text-warning">Moderate NPDR</span>
-            <p className="mt-1 text-xs text-muted-foreground">Progressive</p>
-          </div>
           <div className="rounded-lg bg-severe/10 p-3">
             <span className="text-sm font-medium text-severe">Severe NPDR</span>
             <p className="mt-1 text-xs text-muted-foreground">Advanced</p>
-          </div>
-          <div className="rounded-lg bg-destructive/10 p-3">
-            <span className="text-sm font-medium text-destructive">Proliferative</span>
-            <p className="mt-1 text-xs text-muted-foreground">Urgent care</p>
           </div>
         </div>
       </div>

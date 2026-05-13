@@ -51,7 +51,7 @@ def load_model():
             print(f"Warning: Checkpoint not found at {CHECKPOINT_PATH}")
             return False
         
-        ckpt = torch.load(CHECKPOINT_PATH, map_location=device)
+        ckpt = torch.load(CHECKPOINT_PATH, map_location=device, weights_only=False)
         model = build_model(CONFIG).to(device)
         model.load_state_dict(ckpt["model_state"])
         model.eval()
